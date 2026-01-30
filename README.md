@@ -105,7 +105,8 @@ nano ~/.kiro/config.json
       "env": {
         "SSH_HOST": "your-vps.com",
         "SSH_USERNAME": "root",
-        "SSH_PRIVATE_KEY_PATH": "~/.ssh/id_rsa"
+        "SSH_PRIVATE_KEY_PATH": "~/.ssh/id_rsa",
+        "SSH_PORT": "22"
       }
     }
   }
@@ -182,7 +183,8 @@ npm run build
       "env": {
         "SSH_HOST": "your-vps.com",
         "SSH_USERNAME": "root",
-        "SSH_PRIVATE_KEY_PATH": "/home/user/.ssh/id_rsa"
+        "SSH_PRIVATE_KEY_PATH": "/home/user/.ssh/id_rsa",
+        "SSH_PORT": "22"
       }
     }
   }
