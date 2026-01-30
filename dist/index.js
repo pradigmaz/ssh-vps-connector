@@ -51,6 +51,9 @@ class SSHVPSConnector {
             password: process.env.SSH_PASSWORD,
             port: parseInt(process.env.SSH_PORT || '22'),
         };
+        // Security configuration
+        const blockedCommands = process.env.BLOCKED_COMMANDS?.split(',').map(cmd => cmd.trim()).filter(Boolean) || [];
+        const allowedDirectories = process.env.ALLOWED_DIRECTORIES?.split(',').map(dir => dir.trim()).filter(Boolean) || [];
         this.setupHandlers();
     }
     async ensureConfigDir() {
@@ -101,6 +104,29 @@ class SSHVPSConnector {
             throw new Error('Either password or privateKeyPath must be provided');
         }
         await this.ssh.connect(sshConfig);
+    }
+    validateCommand(command) {
+        const blockedCommands = process.env.BLOCKED_COMMANDS?.split(',').map(cmd => cmd.trim()).filter(Boolean) || [];
+        const allowedDirectories = process.env.ALLOWED_DIRECTORIES?.split(',').map(dir => dir.trim()).filter(Boolean) || [];
+        // Check blacklist
+        const allBlocked = [...DESTRUCTIVE_COMMANDS, ...blockedCommands];
+        for (const blocked of allBlocked) {
+            if (command.toLowerCase().includes(blocked.toLowerCase())) {
+                console.error(`[${new Date().toISOString()}] BLOCKED: ${command}`);
+                throw new Error(`Command blocked: ${command}`);
+            }
+        }
+        // Check whitelist directories
+        if (allowedDirectories.length > 0) {
+            const pathMatch = command.match(/(?:cd|ls|cat|docker\s+.*-v|cp|mv|mkdir|touch|nano|vim)\s+([^\s;|&]+)/);
+            if (pathMatch) {
+                const cmdPath = pathMatch[1].replace(/['"]/g, '');
+                if (cmdPath.includes('..') || !allowedDirectories.some(dir => cmdPath.startsWith(dir))) {
+                    console.error(`[${new Date().toISOString()}] BLOCKED PATH: ${command}`);
+                    throw new Error(`Path not allowed: ${cmdPath}`);
+                }
+            }
+        }
     }
     async executeCommand(command) {
         const result = await this.ssh.execCommand(command);
@@ -341,9 +367,7 @@ class SSHVPSConnector {
                 switch (name) {
                     case 'ssh_execute_command': {
                         const params = ExecuteCommandSchema.parse(args);
-                        if (DESTRUCTIVE_COMMANDS.some(cmd => params.command.toLowerCase().includes(cmd.toLowerCase()))) {
-                            throw new Error(`Destructive command blocked: ${params.command}`);
-                        }
+                        this.validateCommand(params.command);
                         await this.connectSSH(params);
                         const result = await this.executeCommand(params.command);
                         this.ssh.dispose();

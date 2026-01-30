@@ -40,8 +40,11 @@ interface VPSConfig {
 const DESTRUCTIVE_COMMANDS = [
   'rm -rf', 'dd if=', 'mkfs', 'fdisk', 'parted', 'shutdown', 'reboot',
   'halt', 'poweroff', 'init 0', 'init 6', 'systemctl poweroff',
-  'systemctl reboot', 'docker system prune -a', 'docker volume prune'
+  'systemctl reboot', 'docker system prune -a', 'docker volume prune',
+  'docker run --privileged', 'nsenter', 'chroot'
 ];
+
+const DANGEROUS_CHARS = /[;|&$()]/;
 
 class SSHVPSConnector {
   private server: Server;
@@ -68,6 +71,10 @@ class SSHVPSConnector {
       password: process.env.SSH_PASSWORD,
       port: parseInt(process.env.SSH_PORT || '22'),
     };
+
+    // Security configuration
+    const allowedCommands = process.env.ALLOWED_COMMANDS?.split(',').map(cmd => cmd.trim()).filter(Boolean) || [];
+    const allowedDirectories = process.env.ALLOWED_DIRECTORIES?.split(',').map(dir => dir.trim()).filter(Boolean) || [];
 
     this.setupHandlers();
   }
@@ -125,8 +132,82 @@ class SSHVPSConnector {
     await this.ssh.connect(sshConfig);
   }
 
+  private sanitizeParameter(param: string): string {
+    if (DANGEROUS_CHARS.test(param)) {
+      console.error(`[${new Date().toISOString()}] BLOCKED: Dangerous characters in parameter: ${param}`);
+      throw new Error(`Invalid parameter: contains dangerous characters`);
+    }
+    return param.replace(/['"]/g, '').trim();
+  }
+
+  private validateCommand(command: string): void {
+    const allowedCommands = process.env.ALLOWED_COMMANDS?.split(',').map(cmd => cmd.trim()).filter(Boolean) || [];
+    const allowedDirectories = process.env.ALLOWED_DIRECTORIES?.split(',').map(dir => dir.trim()).filter(Boolean) || [];
+    
+    // Check for dangerous characters
+    if (DANGEROUS_CHARS.test(command)) {
+      console.error(`[${new Date().toISOString()}] BLOCKED: Command injection attempt: ${command}`);
+      throw new Error(`Command blocked: contains dangerous characters`);
+    }
+
+    // Check whitelist - if empty, block everything
+    if (allowedCommands.length === 0) {
+      console.error(`[${new Date().toISOString()}] Command not in whitelist: ${command}`);
+      throw new Error(`Command not in whitelist: ${command}`);
+    }
+
+    // Get base command (first token)
+    const baseCommand = command.split(' ')[0].toLowerCase();
+    const isAllowed = allowedCommands.some(allowed => baseCommand === allowed.toLowerCase());
+    if (!isAllowed) {
+      console.error(`[${new Date().toISOString()}] Command not in whitelist: ${baseCommand}. Allowed: ${allowedCommands.join(', ')}`);
+      throw new Error(`Command not in whitelist: ${baseCommand}`);
+    }
+
+    // Strict validation for docker/systemctl subcommands
+    if (baseCommand === 'docker' || baseCommand === 'systemctl') {
+      const tokens = command.split(' ');
+      if (tokens.length > 1) {
+        const subCommand = tokens[1].toLowerCase();
+        if (baseCommand === 'docker' && ['run', 'exec'].includes(subCommand)) {
+          if (command.includes('--privileged')) {
+            console.error(`[${new Date().toISOString()}] BLOCKED: Privileged docker command: ${command}`);
+            throw new Error(`Privileged docker commands not allowed`);
+          }
+        }
+      }
+    }
+
+    // Check destructive commands by tokens
+    const commandTokens = command.toLowerCase().split(' ');
+    for (const blocked of DESTRUCTIVE_COMMANDS) {
+      const blockedTokens = blocked.toLowerCase().split(' ');
+      if (blockedTokens.every(token => commandTokens.includes(token))) {
+        console.error(`[${new Date().toISOString()}] BLOCKED: ${command}`);
+        throw new Error(`Command blocked: ${command}`);
+      }
+    }
+
+    // Check whitelist directories
+    if (allowedDirectories.length > 0) {
+      const pathMatch = command.match(/(?:cd|ls|cat|docker\s+.*-v|cp|mv|mkdir|touch|nano|vim)\s+([^\s;|&]+)/);
+      if (pathMatch) {
+        const cmdPath = pathMatch[1].replace(/['"]/g, '');
+        if (cmdPath.includes('..') || !allowedDirectories.some(dir => cmdPath.startsWith(dir))) {
+          console.error(`[${new Date().toISOString()}] BLOCKED PATH: ${command}`);
+          throw new Error(`Path not allowed: ${cmdPath}`);
+        }
+      }
+    }
+  }
+
   private async executeCommand(command: string): Promise<string> {
-    const result = await this.ssh.execCommand(command);
+    const result = await Promise.race([
+      this.ssh.execCommand(command),
+      new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Command timeout after 5 seconds')), 5000)
+      )
+    ]);
     return result.stdout || result.stderr || '';
   }
 
@@ -368,9 +449,7 @@ class SSHVPSConnector {
         switch (name) {
           case 'ssh_execute_command': {
             const params = ExecuteCommandSchema.parse(args);
-            if (DESTRUCTIVE_COMMANDS.some(cmd => params.command.toLowerCase().includes(cmd.toLowerCase()))) {
-              throw new Error(`Destructive command blocked: ${params.command}`);
-            }
+            this.validateCommand(params.command);
             await this.connectSSH(params);
             const result = await this.executeCommand(params.command);
             this.ssh.dispose();
@@ -379,16 +458,18 @@ class SSHVPSConnector {
 
           case 'ssh_read_docker_logs': {
             const params = DockerLogsSchema.parse(args);
+            const containerName = this.sanitizeParameter(params.containerName);
             await this.connectSSH(params);
-            const result = await this.executeCommand(`docker logs --tail ${params.lines} ${params.containerName}`);
+            const result = await this.executeCommand(`docker logs --tail ${params.lines} ${containerName}`);
             this.ssh.dispose();
             return { content: [{ type: 'text', text: result }] };
           }
 
           case 'ssh_check_service_status': {
             const params = ServiceStatusSchema.parse(args);
+            const serviceName = this.sanitizeParameter(params.serviceName);
             await this.connectSSH(params);
-            const result = await this.executeCommand(`systemctl status ${params.serviceName}`);
+            const result = await this.executeCommand(`systemctl status ${serviceName}`);
             this.ssh.dispose();
             return { content: [{ type: 'text', text: result }] };
           }

@@ -2,7 +2,7 @@
 
 MCP сервер для SSH подключения к VPS с автоматизацией диагностики и мониторинга.
 
-**Совместим с Claude Desktop, Cursor, Cline, Kiro CLI и другими MCP клиентами**
+**Совместим с Claude Desktop, Cursor, Cline и другими MCP клиентами**
 
 ## Новые возможности
 
@@ -252,21 +252,10 @@ notepad %APPDATA%\Claude\claude_desktop_config.json
 }
 ```
 
-#### Kiro CLI
+#### Другие MCP клиенты
 
-**Linux:**
-```bash
-# Откройте файл конфигурации
-nano ~/.kiro/config.json
-```
+Для других MCP клиентов найдите конфигурационный файл в документации вашего клиента и добавьте:
 
-**Windows:**
-```cmd
-REM Откройте файл конфигурации
-notepad %USERPROFILE%\.kiro\config.json
-```
-
-**Конфигурация:**
 ```json
 {
   "mcpServers": {
@@ -340,26 +329,82 @@ npm install
 npm run build
 ```
 
-## Конфигурация в Kiro CLI
+## Настройка безопасности
 
-### Аутентификация по SSH ключу
+### Whitelist команд (ALLOWED_COMMANDS)
+
+По умолчанию MCP сервер блокирует ВСЕ команды для безопасности.
+
+**Как работает:**
+- Пустой `ALLOWED_COMMANDS` = ничего нельзя (только подключение к VPS)
+- Указаны команды = можно выполнять ТОЛЬКО эти команды
+
+**Примеры конфигурации:**
+
+#### Базовый доступ (только чтение)
+```json
+{
+  "mcpServers": {
+    "ssh-vps-connector": {
+      "command": "node",
+      "args": ["~/.mcp-servers/ssh-vps-connector/dist/index.js"],
+      "env": {
+        "SSH_HOST": "your-vps.com",
+        "SSH_USERNAME": "root",
+        "SSH_PRIVATE_KEY_PATH": "~/.ssh/id_rsa",
+        "ALLOWED_COMMANDS": "ls,cat,grep,ps,docker ps,docker logs"
+      }
+    }
+  }
+}
+```
+
+#### Расширенный доступ (чтение + управление Docker)
+```json
+"ALLOWED_COMMANDS": "ls,cat,grep,ps,docker ps,docker logs,docker start,docker stop,docker restart"
+```
+
+#### Полный доступ (всё кроме опасного)
+```json
+"ALLOWED_COMMANDS": "ls,cat,grep,ps,docker,systemctl,mkdir,cp,mv"
+```
+
+### Whitelist директорий (ALLOWED_DIRECTORIES)
+
+Ограничивает работу только с определёнными папками.
+
+**Пример:**
+```json
+"ALLOWED_DIRECTORIES": "/var/www,/home/user/projects,/opt/app"
+```
+
+- Пустой = любые папки разрешены
+- Указаны папки = работа только в этих папках
+
+### Полный пример конфигурации
 
 ```json
 {
   "mcpServers": {
     "ssh-vps-connector": {
       "command": "node",
-      "args": ["/home/user/.mcp-servers/ssh-vps-connector/dist/index.js"],
+      "args": ["~/.mcp-servers/ssh-vps-connector/dist/index.js"],
       "env": {
         "SSH_HOST": "your-vps.com",
         "SSH_USERNAME": "root",
-        "SSH_PRIVATE_KEY_PATH": "/home/user/.ssh/id_rsa",
-        "SSH_PORT": "22"
+        "SSH_PRIVATE_KEY_PATH": "~/.ssh/id_rsa",
+        "SSH_PORT": "22",
+        "ALLOWED_COMMANDS": "ls,cat,docker ps,docker logs,docker restart",
+        "ALLOWED_DIRECTORIES": "/var/www,/opt/app"
       }
     }
   }
 }
 ```
+
+### Словарь команд
+
+Полный список команд с описаниями смотри в [COMMANDS_DICTIONARY.md](./COMMANDS_DICTIONARY.md)
 
 ## Инструменты
 
@@ -389,6 +434,99 @@ npm run build
 - Валидация всех параметров с Zod
 - Логирование операций
 
+## Дополнительная защита
+
+### Command Injection Protection
+Сервер автоматически блокирует опасные символы в командах:
+- `;` - разделитель команд
+- `|` - пайп (кроме разрешённых случаев)
+- `&` - фоновое выполнение
+- `$` - подстановка переменных
+- `` ` `` - выполнение команд
+- `>` `<` - перенаправление (кроме разрешённых)
+
+**Пример блокировки:**
+```bash
+# Заблокировано
+ls; rm -rf /
+cat file | sh
+echo $PASSWORD
+
+# Разрешено
+ls -la
+docker ps | grep nginx
+```
+
+### Privileged Operations Block
+Автоматически блокируются привилегированные операции:
+- `sudo` - выполнение от имени root
+- `su` - смена пользователя
+- `passwd` - смена паролей
+- `useradd/userdel` - управление пользователями
+- `mount/umount` - монтирование дисков
+
+### Dangerous Subcommands Block
+Блокируются опасные подкоманды даже если основная команда разрешена:
+- `rm -rf` - рекурсивное удаление
+- `chmod 777` - открытие всех прав
+- `dd if=/dev/zero` - затирание дисков
+- `:(){ :|:& };:` - fork bomb
+
+### Path Traversal Protection
+Защита от выхода за пределы разрешённых директорий:
+- `../../../etc/passwd` - заблокировано
+- `~/../.ssh/` - заблокировано
+- Абсолютные пути проверяются против ALLOWED_DIRECTORIES
+
+### Timeout Protection
+- Все команды имеют timeout 5 секунд
+- Предотвращает зависание на долгих операциях
+- Автоматическое завершение зависших процессов
+
+### Security Logging
+Все попытки обхода безопасности логируются:
+- Заблокированные команды
+- Попытки command injection
+- Нарушения path traversal
+- Превышение timeout
+
+### Рекомендации по безопасности
+
+#### Минимальные права
+Используйте отдельного пользователя для SSH подключений:
+```bash
+# Создайте пользователя для MCP
+sudo useradd -m -s /bin/bash mcpuser
+sudo usermod -aG docker mcpuser  # если нужен Docker
+
+# Настройте SSH ключ для этого пользователя
+sudo -u mcpuser ssh-keygen -t rsa -b 4096
+```
+
+#### Ограничение команд
+Начните с минимального набора команд:
+```json
+"ALLOWED_COMMANDS": "ls,cat,ps,docker ps,docker logs"
+```
+
+#### Ограничение директорий
+Ограничьте доступ только к рабочим папкам:
+```json
+"ALLOWED_DIRECTORIES": "/var/www,/opt/app,/home/mcpuser"
+```
+
+#### Мониторинг
+Регулярно проверяйте логи на подозрительную активность:
+```bash
+# Проверка логов MCP сервера
+journalctl -u your-mcp-service | grep "SECURITY"
+```
+
+#### Сетевая безопасность
+- Используйте нестандартный SSH порт
+- Настройте fail2ban для защиты от брутфорса
+- Ограничьте SSH доступ по IP адресам
+
 ## Пример использования
 
 ```typescript
@@ -399,7 +537,7 @@ await callTool('ssh_monitor_resources', {});
 await callTool('ssh_read_docker_logs', {
   host: 'your-vps.com',
   username: 'root',
-  privateKeyPath: '/home/user/.ssh/id_rsa',
+  privateKeyPath: '~/.ssh/id_rsa',
   containerName: 'nginx',
   lines: 50
 });
@@ -408,7 +546,7 @@ await callTool('ssh_read_docker_logs', {
 await callTool('ssh_execute_command', {
   host: 'your-vps.com',
   username: 'root',
-  privateKeyPath: '/home/user/.ssh/id_rsa',
+  privateKeyPath: '~/.ssh/id_rsa',
   command: 'docker ps'
 });
 ```
