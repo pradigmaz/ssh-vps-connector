@@ -1,3 +1,21 @@
 node_modules/
+dist/
 .env
 *.log
+
+# VPS configs with sensitive data
+.ai/
+*vps-config*.json
+
+# SSH keys
+*.pem
+*_key
+*_key.pub
+.ssh/
+
+# MCP configs (may contain tokens/keys)
+mcp.json
+
+# Backup files
+*.backup
+*.bak
