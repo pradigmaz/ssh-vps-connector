@@ -2,17 +2,21 @@
 
 MCP сервер для SSH подключения к VPS с автоматизацией диагностики и мониторинга.
 
+**Совместим с Claude Desktop, Cursor, Cline, Kiro CLI и другими MCP клиентами**
+
 ## Полная инструкция по установке и настройке
 
 ### 1. Установка
 
-#### Клонирование репозитория
+#### Linux
+
+##### Клонирование репозитория
 ```bash
 # Создайте директорию для MCP серверов (если не существует)
-mkdir -p ~/.kiro/mcp-servers
+mkdir -p ~/.mcp-servers
 
 # Перейдите в директорию
-cd ~/.kiro/mcp-servers
+cd ~/.mcp-servers
 
 # Клонируйте репозиторий
 git clone https://github.com/pradigmaz/ssh-vps-connector.git
@@ -30,11 +34,43 @@ npm install
 npm run build
 ```
 
-**Рекомендуемый путь установки:** `~/.kiro/mcp-servers/ssh-vps-connector`
+**Рекомендуемый путь установки:** `~/.mcp-servers/ssh-vps-connector`
+
+#### Windows
+
+**Требования:** OpenSSH для Windows (встроен в Windows 10/11 или установите через Settings > Apps > Optional Features)
+
+##### Клонирование репозитория
+```cmd
+REM Создайте директорию для MCP серверов (если не существует)
+mkdir %USERPROFILE%\.mcp-servers
+
+REM Перейдите в директорию
+cd %USERPROFILE%\.mcp-servers
+
+REM Клонируйте репозиторий
+git clone https://github.com/pradigmaz/ssh-vps-connector.git
+
+REM Перейдите в директорию проекта
+cd ssh-vps-connector
+```
+
+##### Установка зависимостей
+```cmd
+REM Установите зависимости
+npm install
+
+REM Соберите проект
+npm run build
+```
+
+**Рекомендуемый путь установки:** `%USERPROFILE%\.mcp-servers\ssh-vps-connector`
 
 ### 2. Создание SSH ключа
 
-#### Генерация SSH ключа
+#### Linux
+
+##### Генерация SSH ключа
 ```bash
 # Создайте SSH ключ (если у вас его нет)
 ssh-keygen -t rsa -b 4096 -C "your-email@example.com"
@@ -43,7 +79,7 @@ ssh-keygen -t rsa -b 4096 -C "your-email@example.com"
 # /home/username/.ssh/id_rsa
 ```
 
-#### Настройка прав доступа
+##### Настройка прав доступа
 ```bash
 # Установите правильные права доступа
 chmod 700 ~/.ssh
@@ -51,22 +87,62 @@ chmod 600 ~/.ssh/id_rsa
 chmod 644 ~/.ssh/id_rsa.pub
 ```
 
+#### Windows
+
+##### Генерация SSH ключа
+```cmd
+REM Создайте SSH ключ (если у вас его нет)
+ssh-keygen -t rsa -b 4096 -C "your-email@example.com"
+
+REM При запросе пути к файлу, нажмите Enter для использования по умолчанию:
+REM C:\Users\username\.ssh\id_rsa
+```
+
+##### Настройка прав доступа
+```cmd
+REM Установите правильные права доступа
+icacls %USERPROFILE%\.ssh /inheritance:r
+icacls %USERPROFILE%\.ssh /grant:r %USERNAME%:(F)
+icacls %USERPROFILE%\.ssh\id_rsa /inheritance:r
+icacls %USERPROFILE%\.ssh\id_rsa /grant:r %USERNAME%:(R)
+```
+
 ### 3. Настройка на VPS
 
 #### Копирование публичного ключа на сервер
 
-**Способ 1: Использование ssh-copy-id (рекомендуется)**
+**Способ 1: Использование ssh-copy-id (Linux)**
 ```bash
 # Замените user и your-vps.com на ваши данные
 ssh-copy-id user@your-vps.com
 ```
 
-**Способ 2: Ручное копирование**
+**Способ 1: Ручное копирование (Windows)**
+```cmd
+REM Скопируйте содержимое публичного ключа
+type %USERPROFILE%\.ssh\id_rsa.pub | ssh user@your-vps.com "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"
+```
+
+**Способ 2: Ручное копирование (Linux)**
 ```bash
 # Скопируйте содержимое публичного ключа
 cat ~/.ssh/id_rsa.pub
 
 # Подключитесь к VPS и добавьте ключ
+ssh user@your-vps.com
+mkdir -p ~/.ssh
+echo "ваш_публичный_ключ" >> ~/.ssh/authorized_keys
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/authorized_keys
+exit
+```
+
+**Способ 2: Ручное копирование (Windows)**
+```cmd
+REM Скопируйте содержимое публичного ключа
+type %USERPROFILE%\.ssh\id_rsa.pub
+
+REM Подключитесь к VPS и добавьте ключ
 ssh user@your-vps.com
 mkdir -p ~/.ssh
 echo "ваш_публичный_ключ" >> ~/.ssh/authorized_keys
@@ -84,24 +160,103 @@ ssh user@your-vps.com
 exit
 ```
 
-### 4. Конфигурация MCP сервера
+### 4. Конфигурация MCP клиента
 
-#### Настройка в Kiro CLI
-Создайте или отредактируйте файл конфигурации Kiro CLI:
+#### Claude Desktop
 
+**Linux:**
 ```bash
 # Откройте файл конфигурации
-nano ~/.kiro/config.json
+nano ~/.config/claude/claude_desktop_config.json
 ```
 
-Добавьте конфигурацию MCP сервера:
+**Windows:**
+```cmd
+REM Откройте файл конфигурации
+notepad %APPDATA%\Claude\claude_desktop_config.json
+```
+
+**Конфигурация:**
+```json
+{
+  "mcpServers": {
+    "ssh-vps-connector": {
+      "command": "node",
+      "args": ["~/.mcp-servers/ssh-vps-connector/dist/index.js"],
+      "env": {
+        "SSH_HOST": "your-vps.com",
+        "SSH_USERNAME": "root",
+        "SSH_PRIVATE_KEY_PATH": "~/.ssh/id_rsa",
+        "SSH_PORT": "22"
+      }
+    }
+  }
+}
+```
+
+#### Cursor
+
+Откройте настройки Cursor (Ctrl+,) и добавьте в settings.json:
+
+```json
+{
+  "mcp.servers": {
+    "ssh-vps-connector": {
+      "command": "node",
+      "args": ["~/.mcp-servers/ssh-vps-connector/dist/index.js"],
+      "env": {
+        "SSH_HOST": "your-vps.com",
+        "SSH_USERNAME": "root",
+        "SSH_PRIVATE_KEY_PATH": "~/.ssh/id_rsa",
+        "SSH_PORT": "22"
+      }
+    }
+  }
+}
+```
+
+#### Cline
+
+В настройках MCP добавьте:
 
 ```json
 {
   "mcpServers": {
     "ssh-vps-connector": {
       "command": "node",
-      "args": ["~/.kiro/mcp-servers/ssh-vps-connector/dist/index.js"],
+      "args": ["~/.mcp-servers/ssh-vps-connector/dist/index.js"],
+      "env": {
+        "SSH_HOST": "your-vps.com",
+        "SSH_USERNAME": "root",
+        "SSH_PRIVATE_KEY_PATH": "~/.ssh/id_rsa",
+        "SSH_PORT": "22"
+      }
+    }
+  }
+}
+```
+
+#### Kiro CLI
+
+**Linux:**
+```bash
+# Откройте файл конфигурации
+nano ~/.kiro/config.json
+```
+
+**Windows:**
+```cmd
+REM Откройте файл конфигурации
+notepad %USERPROFILE%\.kiro\config.json
+```
+
+**Конфигурация:**
+```json
+{
+  "mcpServers": {
+    "ssh-vps-connector": {
+      "command": "node",
+      "args": ["~/.mcp-servers/ssh-vps-connector/dist/index.js"],
       "env": {
         "SSH_HOST": "your-vps.com",
         "SSH_USERNAME": "root",
@@ -125,8 +280,8 @@ nano ~/.kiro/config.json
 
 #### Тестовая команда
 ```bash
-# Перезапустите Kiro CLI для применения конфигурации
-kiro-cli chat
+# Перезапустите ваш MCP клиент для применения конфигурации
+# Запустите ваш MCP клиент
 
 # В чате попробуйте выполнить команду:
 # "Проверь статус системы на VPS"
@@ -154,17 +309,16 @@ ssh -p 22 user@your-vps.com
 **Проблема: MCP сервер не запускается**
 ```bash
 # Проверьте, что проект собран
-cd ~/.kiro/mcp-servers/ssh-vps-connector
+cd ~/.mcp-servers/ssh-vps-connector
 npm run build
 
-# Проверьте логи Kiro CLI
-kiro-cli --debug
+# Проверьте логи вашего MCP клиента
 ```
 
 **Проблема: "Module not found"**
 ```bash
 # Переустановите зависимости
-cd ~/.kiro/mcp-servers/ssh-vps-connector
+cd ~/.mcp-servers/ssh-vps-connector
 rm -rf node_modules package-lock.json
 npm install
 npm run build
@@ -179,7 +333,7 @@ npm run build
   "mcpServers": {
     "ssh-vps-connector": {
       "command": "node",
-      "args": ["/home/zaikana/.kiro/mcp-servers/ssh-vps-connector/dist/index.js"],
+      "args": ["/home/user/.mcp-servers/ssh-vps-connector/dist/index.js"],
       "env": {
         "SSH_HOST": "your-vps.com",
         "SSH_USERNAME": "root",
