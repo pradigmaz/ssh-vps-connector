@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ssh-vps-connector": {
+      "command": "node",
+      "args": ["/home/zaikana/.kiro/mcp-servers/ssh-vps-connector/dist/index.js"],
+      "env": {}
+    }
+  }
+}
