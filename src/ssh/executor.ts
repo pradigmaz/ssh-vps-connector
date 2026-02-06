@@ -7,7 +7,7 @@ export class SSHExecutor {
     const result = await Promise.race([
       this.ssh.execCommand(command),
       new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Command timeout after 5 seconds')), 5000)
+        setTimeout(() => reject(new Error('Command timeout after 5 minutes')), 300000)
       )
     ]);
     return result.stdout || result.stderr || '';
