@@ -1,98 +1,62 @@
-# SSH VPS Connector MCP Server
+# SSH VPS Connector
 
-MCP сервер для SSH подключения к VPS с автоматизацией диагностики и мониторинга. Автоматически собирает данные о Docker контейнерах, базах данных и сервисах при первом подключении.
+Minimal MCP server for running commands through native OpenSSH. Docker has no special integration; run Docker commands through `ssh_execute` when needed.
 
-## Быстрый старт
+## Requirements
 
-1. **Установка**
-   ```bash
-   git clone https://github.com/pradigmaz/ssh-vps-connector.git
-   cd ssh-vps-connector
-   npm install && npm run build
-   ```
+- Node.js 22+
+- OpenSSH client available as `ssh` in `PATH`
+- A working SSH alias or `user@host` target
+- Host key verified once with ordinary OpenSSH before MCP use
 
-2. **Настройка SSH ключа**
-   ```bash
-   ssh-keygen -t rsa -b 4096
-   ssh-copy-id user@your-vps.com
-   ```
+Example SSH config:
 
-3. **Добавить в mcp.json**
-   ```json
-   {
-     "mcpServers": {
-       "ssh-vps-connector": {
-         "command": "node",
-         "args": ["./dist/index.js"],
-         "env": {
-           "SSH_HOST": "your-vps.com",
-           "SSH_USERNAME": "root",
-           "SSH_PRIVATE_KEY_PATH": "~/.ssh/id_rsa"
-         }
-       }
-     }
-   }
-   ```
-
-## Конфигурация
-
-```json
-{
-  "mcpServers": {
-    "ssh-vps-connector": {
-      "command": "node",
-      "args": ["./dist/index.js"],
-      "env": {
-        "SSH_HOST": "your-vps.com",
-        "SSH_USERNAME": "root",
-        "SSH_PRIVATE_KEY_PATH": "~/.ssh/id_rsa",
-        "SSH_PORT": "22",
-        "ALLOWED_COMMANDS": "ls,cat,docker ps,docker logs",
-        "ALLOWED_DIRECTORIES": "/var/www,/opt/app"
-      }
-    }
-  }
-}
+```sshconfig
+Host my-vps
+  HostName 203.0.113.10
+  User deploy
+  IdentityFile ~/.ssh/id_ed25519
 ```
 
-## Настройка безопасности
+Verify manually:
 
-### Базовый доступ (только чтение)
-```json
-"ALLOWED_COMMANDS": "ls,cat,grep,ps,docker ps,docker logs"
+```powershell
+ssh my-vps "whoami; hostname; pwd"
 ```
 
-### Расширенный доступ (управление Docker)
-```json
-"ALLOWED_COMMANDS": "ls,cat,docker ps,docker logs,docker start,docker stop,docker restart"
+## Install
+
+```powershell
+npm ci
+npm test
+npm run build
 ```
 
-### Ограничение директорий
-```json
-"ALLOWED_DIRECTORIES": "/var/www,/home/user/projects,/opt/app"
+Codex configuration:
+
+```toml
+[mcp_servers.ssh-vps-connector]
+command = "node"
+args = ["dist/index.js"]
+cwd = 'E:\mcp\ssh-vps-connector'
+enabled = true
+startup_timeout_sec = 30.0
+tool_timeout_sec = 330.0
+env = { SSH_TARGET = "deploy@192.0.2.10" }
 ```
 
-## Инструменты
+Restart Codex after changing MCP configuration.
 
-- `ssh_execute_command` - выполнение команд на VPS
-- `ssh_read_docker_logs` - чтение логов Docker контейнеров
-- `ssh_check_service_status` - проверка статуса systemd сервисов
-- `ssh_monitor_resources` - мониторинг CPU/RAM/Disk
-- `ssh_list_containers` - список Docker контейнеров
-- `ssh_refresh_vps_data` - обновить собранные данные VPS
-- `ssh_get_vps_config` - получить кэшированную конфигурацию VPS
+## Tools
 
-## Документация
+- `ssh_status` runs harmless identity/system checks.
+- `ssh_execute` runs one command with an optional timeout from 1 to 300 seconds.
 
-- [INSTALLATION.md](./INSTALLATION.md) - подробная инструкция по установке
-- [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) - решение проблем
-- [COMMANDS_DICTIONARY.md](./COMMANDS_DICTIONARY.md) - словарь команд
+Results contain `exitCode`, `stdout`, `stderr`, `timedOut`, and `truncated`. Nonzero exit codes and timeouts are MCP errors. Each output stream is capped at 64 KiB.
 
-## Безопасность
+## Security
 
-- Аутентификация по SSH ключам
-- Блокировка деструктивных команд
-- Защита от command injection
-- Ограничение доступа к директориям
-- Timeout для всех операций
-- Логирование всех действий
+- Host, user, key, and password are never accepted in MCP tool arguments.
+- Authentication and `known_hosts` verification stay in native OpenSSH.
+- `BatchMode=yes` prevents password prompts from hanging the MCP process.
+- `ssh_execute` is intentionally unrestricted. Use a dedicated VPS account and server-side `sudo` policy for authorization.

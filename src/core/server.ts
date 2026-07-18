@@ -1,169 +1,67 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { VPSConfig } from '../security/schemas.js';
-import {
-  executeCommand,
-  readDockerLogs,
-  listContainers,
-  checkServiceStatus,
-  monitorResources,
-  refreshVPSData,
-  getVPSConfig,
-  loadVPSConfig,
-  initializeVPSData
-} from '../tools/index.js';
-import { defaultConfig } from './config.js';
+import { sshExecute, sshStatus } from '../tools/index.js';
 
 export class MCPServer {
-  private server: Server;
-  private vpsConfig: VPSConfig | null = null;
+  private readonly server = new Server(
+    { name: 'ssh-vps-connector', version: '1.0.0' },
+    { capabilities: { tools: {} } },
+  );
 
   constructor() {
-    this.server = new Server({
-      name: 'ssh-vps-connector',
-      version: '1.0.0',
-    }, {
-      capabilities: { tools: {} },
-    });
-
-    this.setupHandlers();
-  }
-
-  private setupHandlers(): void {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: [
         {
-          name: 'ssh_execute_command',
-          description: 'Execute command on VPS via SSH',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              host: { type: 'string' },
-              username: { type: 'string' },
-              privateKeyPath: { type: 'string' },
-              password: { type: 'string' },
-              command: { type: 'string' },
-              port: { type: 'number', default: 22 },
-            },
-            required: ['command'],
-          },
-        },
-        {
-          name: 'ssh_read_docker_logs',
-          description: 'Read Docker container logs',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              host: { type: 'string' },
-              username: { type: 'string' },
-              privateKeyPath: { type: 'string' },
-              password: { type: 'string' },
-              containerName: { type: 'string' },
-              lines: { type: 'number', default: 100 },
-              port: { type: 'number', default: 22 },
-            },
-            required: ['containerName'],
-          },
-        },
-        {
-          name: 'ssh_check_service_status',
-          description: 'Check systemd service status',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              host: { type: 'string' },
-              username: { type: 'string' },
-              privateKeyPath: { type: 'string' },
-              password: { type: 'string' },
-              serviceName: { type: 'string' },
-              port: { type: 'number', default: 22 },
-            },
-            required: ['serviceName'],
-          },
-        },
-        {
-          name: 'ssh_monitor_resources',
-          description: 'Monitor CPU/RAM/Disk usage',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              host: { type: 'string' },
-              username: { type: 'string' },
-              privateKeyPath: { type: 'string' },
-              password: { type: 'string' },
-              port: { type: 'number', default: 22 },
-            },
-            required: [],
-          },
-        },
-        {
-          name: 'ssh_list_containers',
-          description: 'List Docker containers',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              host: { type: 'string' },
-              username: { type: 'string' },
-              privateKeyPath: { type: 'string' },
-              password: { type: 'string' },
-              port: { type: 'number', default: 22 },
-            },
-            required: [],
-          },
-        },
-        {
-          name: 'ssh_refresh_vps_data',
-          description: 'Refresh collected VPS configuration data',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              host: { type: 'string' },
-              username: { type: 'string' },
-              privateKeyPath: { type: 'string' },
-              password: { type: 'string' },
-              port: { type: 'number', default: 22 },
-            },
-            required: [],
-          },
-        },
-        {
-          name: 'ssh_get_vps_config',
-          description: 'Get cached VPS configuration data',
+          name: 'ssh_status',
+          description: 'Check the configured SSH target with harmless system commands',
           inputSchema: {
             type: 'object',
             properties: {},
-            required: [],
+            additionalProperties: false,
+          },
+          annotations: {
+            readOnlyHint: true,
+            destructiveHint: false,
+            openWorldHint: true,
+          },
+        },
+        {
+          name: 'ssh_execute',
+          description: 'Execute one command on the configured SSH target',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              command: { type: 'string', minLength: 1, maxLength: 16_384 },
+              timeoutSeconds: {
+                type: 'integer',
+                minimum: 1,
+                maximum: 300,
+                default: 60,
+              },
+            },
+            required: ['command'],
+            additionalProperties: false,
+          },
+          annotations: {
+            readOnlyHint: false,
+            destructiveHint: true,
+            openWorldHint: true,
           },
         },
       ],
     }));
 
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    this.server.setRequestHandler(CallToolRequestSchema, async request => {
       try {
         const { name, arguments: args } = request.params;
-
-        switch (name) {
-          case 'ssh_execute_command':
-            return await executeCommand(args);
-          case 'ssh_read_docker_logs':
-            return await readDockerLogs(args);
-          case 'ssh_check_service_status':
-            return await checkServiceStatus(args);
-          case 'ssh_monitor_resources':
-            return await monitorResources(args);
-          case 'ssh_list_containers':
-            return await listContainers(args);
-          case 'ssh_refresh_vps_data':
-            return await refreshVPSData(args);
-          case 'ssh_get_vps_config':
-            return await getVPSConfig();
-          default:
-            throw new Error(`Unknown tool: ${name}`);
-        }
+        if (name === 'ssh_status') return await sshStatus();
+        if (name === 'ssh_execute') return await sshExecute(args);
+        throw new Error(`Unknown tool: ${name}`);
       } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
         return {
-          content: [{ type: 'text', text: `Error: ${error}` }],
+          content: [{ type: 'text', text: `Error: ${message}` }],
           isError: true,
         };
       }
@@ -171,21 +69,8 @@ export class MCPServer {
   }
 
   async run(): Promise<void> {
-    try {
-      console.log('[SSH-VPS] Initializing SSH VPS Connector...');
-      
-      // Load existing config or collect new data
-      this.vpsConfig = await loadVPSConfig();
-      if (!this.vpsConfig && defaultConfig.host && defaultConfig.username) {
-        this.vpsConfig = await initializeVPSData();
-      }
-
-      const transport = new StdioServerTransport();
-      await this.server.connect(transport);
-      console.log('[SSH-VPS] Server running successfully');
-    } catch (error) {
-      console.error('[SSH-VPS] Failed to start server:', error);
-      process.exit(1);
-    }
+    console.error('[ssh-vps-connector] starting');
+    await this.server.connect(new StdioServerTransport());
+    console.error('[ssh-vps-connector] ready');
   }
 }
